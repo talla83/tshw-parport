@@ -1,4 +1,4 @@
-lsrio16 for Tom simple handwheel -
+lsrio16 für Tom simple handwheel -
 Eine kleine Erweiterungsplatine mit universellen IOs.
 
 16 x digital output 16 x digital input 
