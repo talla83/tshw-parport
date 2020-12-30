@@ -1,0 +1,255 @@
+###################################################################
+# TsHW Talla simple Hand Wheel  LinuxCNC Version 2.6
+###################################################################
+# ilowpass und and2   
+#
+# Wenn diese schon in einer anderen HAL geladen bzw. verwendet werden,
+# dann muss dies in der Struktur beachtet werden.
+# Denn doppeltes laden von Komponenten ist nicht möglich.
+# Es müssen die loadrt Befehle auskommentiert werden und
+# die loadrt Befehle in den anderen HAL Dateien mit diesen Namen 
+# ergänzt werden.
+# addf kann hier bleiben :-)
+# 
+# Damit der Zero der Achsen geht müssen in der INI die MDI Commands 
+# angelegt werden 
+#
+#	[HALUI]
+#	MDI_COMMAND = G10 L20 P1 X0
+#	MDI_COMMAND = G10 L20 P1 Y0
+#	MDI_COMMAND = G10 L20 P1 Z0
+#
+#
+#
+# Mit setp shw.enc-smooth.gain  kann die Beschleunigung eingestellt werden.
+# und mit setp shw.enc-smooth.scale die Übersetzung
+#
+###################################################################
+
+###################################################################
+# Lötlackls "Poor-Man's" Modifikation
+# unter Verwendung von Schieberegistern
+# und eines Parallelports anstelle von diversen MESA-Karten.
+# Unter diesen Umständen gibt es freilich keinen Analogeingang.
+#
+# Im Gegensatz zum Wiki-Eintrag betreffend "lsrio16"
+# heißt der Befehl zum kompilieren und installieren
+# des Software-Moduls "lsrio16.comp"
+# anstatt    "sudo comp --install lsrio16.comp"
+# inzwischen "sudo halcomp --install lsrio16.comp"
+###################################################################
+
+####################
+##      TsHW      ##
+####################
+
+loadrt lsrio16   count=1
+addf lsrio16.0   base-thread
+
+net lsrio-input-stream  lsrio16.0.ser-in    <= parport.1.pin-10-in
+net lsrio-output-stream lsrio16.0.ser-out   => parport.1.pin-14-out
+net lsrio-clock-output  lsrio16.0.clk       => parport.1.pin-16-out
+net lsrio-data-latch    lsrio16.0.latch     => parport.1.pin-17-out
+
+loadrt debounce cfg=2,10
+addf debounce.0  base-thread
+addf debounce.1  base-thread
+
+loadrt encoder
+addf encoder.capture-position servo-thread
+addf encoder.update-counters  base-thread
+
+net rawquada     debounce.0.0.in           <=  parport.1.pin-11-in
+net rawquadb     debounce.0.1.in           <=  parport.1.pin-12-in
+
+net cleanquada   debounce.0.0.out          => encoder.0.phase-A
+net cleanquadb   debounce.0.1.out          => encoder.0.phase-B
+
+net raw-key-x    lsrio16.0.out-2           => debounce.1.0.in
+net raw-key-y    lsrio16.0.out-1           => debounce.1.1.in
+net raw-key-z    lsrio16.0.out-0           => debounce.1.2.in
+net raw-key-0001 lsrio16.0.out-5           => debounce.1.3.in
+net raw-key-001  lsrio16.0.out-4           => debounce.1.4.in
+net raw-key-01   lsrio16.0.out-3           => debounce.1.5.in
+net raw-key-stop lsrio16.0.out-8           => debounce.1.6.in
+net raw-key-zero lsrio16.0.out-7           => debounce.1.7.in
+net raw-key-run  lsrio16.0.out-6           => debounce.1.8.in
+net raw-key-ena  lsrio16.0.out-9           => debounce.1.9.in
+
+loadrt ilowpass names=shw.enc-smooth
+addf shw.enc-smooth servo-thread
+
+setp shw.enc-smooth.scale 1
+setp shw.enc-smooth.gain  0.025
+
+setp axis.0.jog-vel-mode 1
+setp axis.1.jog-vel-mode 1
+setp axis.2.jog-vel-mode 1
+
+loadrt and2 names=shw.ena-x,shw.ena-y,shw.ena-z,shw.zero-x,shw.zero-y,shw.zero-z
+
+addf shw.ena-x servo-thread
+addf shw.ena-y servo-thread
+addf shw.ena-z servo-thread
+
+addf shw.zero-x servo-thread
+addf shw.zero-y servo-thread
+addf shw.zero-z servo-thread
+
+loadrt mux8 names=shw.step-choice
+addf shw.step-choice servo-thread
+
+net key-0001  => shw.step-choice.sel0
+net key-001   => shw.step-choice.sel1
+net key-01    => shw.step-choice.sel2
+
+setp shw.step-choice.in1 0.001
+setp shw.step-choice.in2 0.01
+setp shw.step-choice.in4 0.1
+
+net step-choice <= shw.step-choice.out
+net step-choice => axis.0.jog-scale
+net step-choice => axis.1.jog-scale
+net step-choice => axis.2.jog-scale
+
+loadrt flipflop    names=shw.ff-x,shw.ff-y,shw.ff-z,shw.ff-0001,shw.ff-001,shw.ff-01
+addf   shw.ff-x    servo-thread
+addf   shw.ff-y    servo-thread
+addf   shw.ff-z    servo-thread
+addf   shw.ff-0001 servo-thread
+addf   shw.ff-001  servo-thread
+addf   shw.ff-01   servo-thread
+loadrt or2         names=shw.or2-0,shw.or2-1,shw.or2-2,shw.or2-3
+addf   shw.or2-0   servo-thread
+addf   shw.or2-1   servo-thread
+addf   shw.or2-2   servo-thread
+addf   shw.or2-3   servo-thread
+
+net ff-data-x   <= debounce.1.0.out
+net ff-data-x   => shw.or2-0.in0
+
+net or2-0-in1   <= shw.or2-1.out
+net or2-0-in1   => shw.or2-0.in1
+
+net ff-data-y   <= debounce.1.1.out
+net ff-data-y   => shw.or2-1.in0
+
+net ff-data-z   <= debounce.1.2.out
+net ff-data-z   => shw.or2-1.in1
+
+net ff-clk-xyz  <= shw.or2-0.out
+net ff-clk-xyz  => shw.ff-x.clk
+net ff-clk-xyz  => shw.ff-y.clk
+net ff-clk-xyz  => shw.ff-z.clk
+net ff-data-x   => shw.ff-x.data
+net ff-data-y   => shw.ff-y.data
+net ff-data-z   => shw.ff-z.data
+
+net ff-data0001 <= debounce.1.3.out
+net ff-data0001 => shw.or2-2.in0
+
+net or2-2-in1   <= shw.or2-3.out
+net or2-2-in1   => shw.or2-2.in1
+
+net ff-data001  <= debounce.1.4.out
+net ff-data001  => shw.or2-3.in0
+
+net ff-data01   <= debounce.1.5.out
+net ff-data01   => shw.or2-3.in1
+
+net ff-clk-step <= shw.or2-2.out
+net ff-clk-step => shw.ff-0001.clk
+net ff-clk-step => shw.ff-001.clk
+net ff-clk-step => shw.ff-01.clk
+net ff-data0001 => shw.ff-0001.data
+net ff-data001  => shw.ff-001.data
+net ff-data01   => shw.ff-01.data
+
+loadrt oneshot
+addf oneshot.0 servo-thread
+setp oneshot.0.width 1
+
+net oneshot-in  => oneshot.0.in
+net oneshot-out <= oneshot.0.out
+net oneshot-out => shw.ff-x.set
+net oneshot-out => shw.ff-y.reset
+net oneshot-out => shw.ff-z.reset
+net oneshot-out => shw.ff-0001.set
+net oneshot-out => shw.ff-001.reset
+net oneshot-out => shw.ff-01.reset
+
+sets oneshot-in 1
+
+net key-x <= shw.ff-x.out
+net key-x => lsrio16.0.in-0
+net key-x => shw.ena-x.in0
+net ena-x shw.ena-x.out => axis.0.jog-enable
+
+net key-y <= shw.ff-y.out
+net key-y => lsrio16.0.in-1
+net key-y => shw.ena-y.in0
+net ena-y shw.ena-y.out => axis.1.jog-enable
+
+net key-z <= shw.ff-z.out
+net key-z => lsrio16.0.in-2
+net key-z => shw.ena-z.in0
+net ena-z shw.ena-z.out => axis.2.jog-enable
+
+net key-0001 <= shw.ff-0001.out
+net key-0001 => lsrio16.0.in-3
+net key-001  <= shw.ff-001.out
+net key-001  => lsrio16.0.in-4
+net key-01   <= shw.ff-01.out
+net key-01   => lsrio16.0.in-5
+
+net key-run  <= debounce.1.6.out
+net key-run  => halui.program.run
+net key-run  => halui.mode.auto
+net led-run  <= halui.program.is-running
+net led-run  => lsrio16.0.in-6
+
+net key-zero <= debounce.1.7.out
+net key-zero => lsrio16.0.in-7
+net key-zero => shw.zero-x.in1
+net key-zero => shw.zero-y.in1
+net key-zero => shw.zero-z.in1
+net key-zero => halui.mode.mdi
+
+net key-x => shw.zero-x.in0
+net key-y => shw.zero-y.in0
+net key-z => shw.zero-z.in0
+
+net zero-x shw.zero-x.out => halui.mdi-command-00
+net zero-y shw.zero-y.out => halui.mdi-command-01
+net zero-z shw.zero-z.out => halui.mdi-command-02
+
+net key-stop <= debounce.1.8.out
+net led-stop => lsrio16.0.in-8
+net key-stop => halui.program.stop
+net led-stop <= halui.program.is-idle
+
+net key-ena <= debounce.1.9.out
+net key-ena => lsrio16.0.in-9
+###################################################################
+# net key-ena => axisui.notifications-clear
+#
+# Diesen Eintrag mußte ich auskommentieren, da hier LinuxCNC
+# beim Start behauptet, der Pin existiere nicht.
+# LinuxCNC-Version ist hier 2.7.15
+# Die Anweisung "net key-ena => axisui.notifications-clear"
+# in der Kommandozeile "Test HAL-Command" abgesetzt,
+# wird aber anstandslos angenommen und verknüpft das Netz entsprechend.
+# Nach erfolgloser Suche im I-Net habe ich es aufgegeben,
+# einen Lösungsansatz zu finden.
+# Ich bin offenbar der einzige mit diesem Problem.
+###################################################################
+net key-ena => shw.ena-x.in1
+net key-ena => shw.ena-y.in1
+net key-ena => shw.ena-z.in1
+net key-ena => halui.mode.manual
+
+net enc-00 shw.enc-smooth.in <= encoder.0.counts
+net enc-01 <= shw.enc-smooth.out
+net enc-01 => axis.0.jog-counts
+net enc-01 => axis.1.jog-counts
+net enc-01 => axis.2.jog-counts
