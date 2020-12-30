@@ -1,0 +1,79 @@
+component lsrio16 "Latching Shift Register I/O";
+author "Kip Shaffer";
+license "GPLv2 or later";
+description """Provides logic to drive latching shift registers, such as the "
+  "74LS595 for output or the 74LS597 for input, to provide for many more "
+  "physical I/O lines.  Data is read from the in-* pins, and sent serially "
+  "out the ser_out pin.  Similarly, data is received on the ser_in pin and "
+  "presented on the out-* pins. "
+  "The following pins should be routed to the parallel port or similar "
+  " input/output device: ser_out, clk, latch, ser_in""";
+pin in  bit in-# [16]  "Parallel input line.";
+pin out bit out-# [16] "Parallel output line.";
+pin out bit ser_out "Serial data out.";
+pin out bit clk "Serial clock pulse.";
+pin out bit latch "Serial register latch.";
+pin in bit  ser_in "Serial data input.";
+
+param r unsigned shift_period = 3;
+param r unsigned update_period = 300;
+
+variable long elapsed;
+variable int mode = 0;
+variable int bitPosition = 0;
+
+function _ nofp;
+;;
+
+#define MAX 16
+
+FUNCTION(_) {
+  elapsed++;
+
+  if(elapsed > shift_period) {
+    switch (mode) {
+       case 0: //Idle
+          if(elapsed > update_period) {
+             mode = 1;
+          }
+          break;
+       case 1: //Latch Input
+          if(!latch) {
+             latch = 1;
+          } else {
+             latch = 0;
+             bitPosition = MAX - 1;
+             ser_out = in(bitPosition);
+             out(bitPosition) = ser_in;
+             mode = 2;
+          }
+          elapsed = 0;
+          break;
+       case 2: //Toggle Data
+          if(!clk) {
+             clk = 1;
+             if(bitPosition == 0) {
+                mode = 3;
+             }
+          } else {
+             bitPosition--;
+             ser_out = in(bitPosition);
+             out(bitPosition) = ser_in;
+             clk = 0;
+          }
+          elapsed = 0;
+          break;
+       case 3: //Latch Output
+          if(!latch) {
+             latch = 1;
+             clk = 0;
+          } else {
+             latch = 0;
+             mode = 0;
+          }
+          elapsed = 0;
+          break;
+     }
+  }
+}
+
