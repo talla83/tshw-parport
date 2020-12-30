@@ -6,3 +6,5 @@ Eine kleine Erweiterungsplatine mit universellen IOs.
 Schnittstelle = Parallel Port oder andere mit GPIO
 
 Der Encoder muss direkt an den ParPort angeschlossen.
+
+https://www.thingiverse.com/thing:3684937
