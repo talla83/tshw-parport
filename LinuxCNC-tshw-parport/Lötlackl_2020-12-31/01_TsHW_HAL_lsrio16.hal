@@ -1,0 +1,371 @@
+###################################################################
+# TsHW Talla simple Hand Wheel  LinuxCNC Version 2.8
+###################################################################
+# ilowpass und and2   
+#
+# Wenn diese schon in einer anderen HAL geladen bzw. verwendet werden,
+# dann muss dies in der Struktur beachtet werden.
+# Denn doppeltes laden von Komponenten ist nicht möglich.
+# Es müssen die loadrt Befehle auskommentiert werden und
+# die loadrt Befehle in den anderen HAL Dateien mit diesen Namen 
+# ergänzt werden.
+# addf kann hier bleiben :-)
+# 
+# Damit der Zero der Achsen geht müssen in der INI die MDI Commands 
+# angelegt werden 
+#
+#	[HALUI]
+#	MDI_COMMAND = G10 L20 P1 X0
+#	MDI_COMMAND = G10 L20 P1 Y0
+#	MDI_COMMAND = G10 L20 P1 Z0
+#
+#
+#
+# Mit setp shw.enc-smooth.gain  kann die Beschleunigung eingestellt werden.
+# und mit setp shw.enc-smooth.scale die Übersetzung
+#
+###################################################################
+
+###################################################################
+# Lötlackls "Poor-Man's" Modifikation
+# unter Verwendung von Schieberegistern
+# und eines Parallelports anstelle von diversen MESA-Karten.
+# Unter diesen Umständen gibt es freilich keinen Analogeingang.
+#
+# Im Gegensatz zum Wiki-Eintrag betreffend "lsrio16"
+# heißt der Befehl zum kompilieren und installieren
+# des Software-Moduls "lsrio16.comp"
+# anstatt    "sudo comp --install lsrio16.comp"
+# inzwischen "sudo halcompile --install lsrio16.comp"
+#
+# Talla83 - LinuxCNC 2.8 Ergänzung bezüglich der Tools zum compile
+# Wenn halcompile nicht installiert ist dann benötigen wir noch folgendes Paket
+# sudo apt-get install linuxcnc-uspace-dev
+# sudo spt-get install make
+# sudo halcompile --install lsrio16.comp
+#
+# folgend das Ergebnis 
+#
+# cnc@cnc:~$ sudo halcompile --install lsrio16.comp
+# Compiling realtime lsrio16.c
+# Linking lsrio16.so
+# cp lsrio16.so /usr/lib/linuxcnc/modules/
+# 
+# lsrio16 ist installiert und kann verwendet werden
+#
+# Das Handrad wird direkt an den Parallelport angeschlossen.
+###################################################################
+
+####################
+##      TsHW      ##
+####################
+
+loadrt lsrio16 count=1
+addf lsrio16.0 base-thread
+
+net lsrio-input-stream lsrio16.0.ser-in <= parport.1.pin-10-in
+net lsrio-output-stream lsrio16.0.ser-out => parport.1.pin-14-out
+net lsrio-clock-output lsrio16.0.clk => parport.1.pin-16-out
+net lsrio-data-latch lsrio16.0.latch => parport.1.pin-09-out
+
+loadrt debounce cfg=2,10
+addf debounce.0 base-thread
+addf debounce.1 base-thread
+setp debounce.1.delay 50 
+
+loadrt encoder names=shw.encoder
+addf encoder.capture-position servo-thread
+addf encoder.update-counters base-thread
+setp shw.encoder.position-scale 4
+
+loadrt conv_float_s32 names=shw.conv
+addf shw.conv servo-thread
+
+net conv shw.conv.in <= shw.encoder.position
+
+net rawquada      debounce.0.0.in  <= parport.1.pin-11-in
+net rawquadb      debounce.0.1.in  <= parport.1.pin-12-in
+net cleanquada    debounce.0.0.out => shw.encoder.phase-A
+net cleanquadb    debounce.0.1.out => shw.encoder.phase-B
+
+# Inputs der Taster
+net raw-key-x     lsrio16.0.out-0  => debounce.1.0.in
+net raw-key-y     lsrio16.0.out-1  => debounce.1.1.in
+net raw-key-z     lsrio16.0.out-2  => debounce.1.2.in
+net raw-key-0001  lsrio16.0.out-3  => debounce.1.3.in
+net raw-key-001   lsrio16.0.out-4  => debounce.1.4.in
+net raw-key-01    lsrio16.0.out-5  => debounce.1.5.in
+net raw-key-stop  lsrio16.0.out-6  => debounce.1.6.in
+net raw-key-zero  lsrio16.0.out-7  => debounce.1.7.in
+net raw-key-run   lsrio16.0.out-8  => debounce.1.8.in
+net raw-key-ena   lsrio16.0.out-9  => debounce.1.9.in
+
+# Outputs für die LEDs der Taster
+net key-x      => lsrio16.0.in-0
+net key-y      => lsrio16.0.in-1
+net key-z      => lsrio16.0.in-2
+net key-0001   => lsrio16.0.in-3
+net key-001    => lsrio16.0.in-4
+net key-01     => lsrio16.0.in-5
+# net led-run-pause shw.run-pause.out => lsrio16.0.in-6
+net key-zero   => lsrio16.0.in-7
+net led-stop   => lsrio16.0.in-8
+net key-ena    => lsrio16.0.in-9
+
+loadrt lut5 names=shw.lock-xyz,shw.lock-step,shw.nor-xyz,shw.nor-step,shw.nor-estop,shw.run-pause
+addf shw.lock-xyz   servo-thread
+addf shw.lock-step  servo-thread
+addf shw.nor-xyz    servo-thread
+addf shw.nor-step   servo-thread
+addf shw.nor-estop  servo-thread
+addf shw.run-pause  servo-thread
+
+setp shw.lock-xyz.function 0x16
+setp shw.lock-step.function 0x16
+setp shw.nor-xyz.function 0x01
+setp shw.nor-step.function 0x01
+setp shw.nor-estop.function 0x01
+setp shw.run-pause.function 0x62
+
+loadrt ilowpass names=shw.enc-smooth
+addf shw.enc-smooth servo-thread
+
+setp shw.enc-smooth.scale 1
+setp shw.enc-smooth.gain 0.025
+setp joint.0.jog-vel-mode 1
+setp axis.x.jog-vel-mode 1
+
+setp joint.1.jog-vel-mode 1
+setp axis.y.jog-vel-mode 1
+
+setp joint.2.jog-vel-mode 1
+setp axis.z.jog-vel-mode 1
+
+loadrt and2 names=shw.ena-x,shw.ena-y,shw.ena-z,shw.zero-x,shw.zero-y,shw.zero-z
+
+addf shw.ena-x servo-thread
+addf shw.ena-y servo-thread
+addf shw.ena-z servo-thread
+
+addf shw.zero-x servo-thread
+addf shw.zero-y servo-thread
+addf shw.zero-z servo-thread
+
+loadrt mux8 names=shw.step-choice
+addf shw.step-choice servo-thread
+
+net key-0001 => shw.step-choice.sel0
+net key-001  => shw.step-choice.sel1
+net key-01   => shw.step-choice.sel2
+
+setp shw.step-choice.in1 0.001
+setp shw.step-choice.in2 0.01
+setp shw.step-choice.in4 0.1
+
+net step-choice <= shw.step-choice.out
+net step-choice => joint.0.jog-scale axis.x.jog-scale
+net step-choice => joint.1.jog-scale axis.y.jog-scale
+net step-choice => joint.2.jog-scale axis.z.jog-scale
+
+############################################
+# prinzipieller Aufbau der Tastenlogik     #
+#                           ______         #
+#                          |  FF  |        #
+#               oneshot----| S  Q |-- out1 #
+#                          |      |        #
+# key1---------------------| D    |        #
+#                          |      |        #
+#                          |      |        #
+#                        .-| CLK  |        #
+#                        | |      |        #
+#                        | | R    |        #
+#                        | |______|        #
+#                        |                 #
+#                        |                 #
+#                        |  ______         #
+#                        | |  FF  |        #
+#                        | | S  Q |-- out2 #
+#                        | |      |        #
+# key2-------------------+-| D    |        #
+#                        | |      |        #
+#                        | |      |        #
+#                        x-| CLK  |        #
+#                        | |      |        #
+#               oneshot--+-| R    |        #
+#                        | |______|        #
+#                        |                 #
+#                        |                 #
+#                        |  ______         #
+#                        | |  FF  |        #
+#                        | | S  Q |-- out3 #
+#                        | |      |        #
+# key3-------------------+-| D    |        #
+#                        | |      |        #
+#                        | |      |        #
+#                        x-| CLK  |        #
+#         ___            | |      |        #
+# key1---|xor|  oneshot--+-| R    |        #
+#        |   |      ___  | |______|        #
+# key2---|lut|-----|  &| |                 #
+#        |1/2|     |   | |                 #
+# key3---|___|     |lut| |  ______         #
+#                  |2/2| | |  FF  |        #
+#        key-ena---o   |-x-| S  Q |--.     #
+#                  |   |   |      |  |     #
+#                  |   |   |      |  |     #
+#                  |   |   |      |  |     #
+#         ___   .--o___|   |      |  |     #
+# key1---|  1|  |          |      |  |     #
+#        |   |  |          |      |  |     #
+# key2---|   o--+----------| R    |  |     #
+#        |   |  |          |______|  |     #
+# key3---|___|  |____________________|     #
+#                   net lock-***           #
+############################################
+
+loadrt flipflop names=shw.ff-x,shw.ff-y,shw.ff-z,shw.ff-0001,shw.ff-001,shw.ff-01,shw.ff-xyz-lock,shw.ff-step-lock
+
+addf shw.ff-x         servo-thread
+addf shw.ff-y         servo-thread
+addf shw.ff-z         servo-thread
+addf shw.ff-0001      servo-thread
+addf shw.ff-001       servo-thread
+addf shw.ff-01        servo-thread
+addf shw.ff-xyz-lock  servo-thread
+addf shw.ff-step-lock servo-thread
+
+net ff-data-x   <= debounce.1.0.out
+net ff-data-y   <= debounce.1.1.out
+net ff-data-z   <= debounce.1.2.out
+
+net ff-data-x   => shw.lock-xyz.in-0
+net ff-data-y   => shw.lock-xyz.in-1
+net ff-data-z   => shw.lock-xyz.in-2
+
+net ff-data-x   => shw.nor-xyz.in-0
+net ff-data-y   => shw.nor-xyz.in-1
+net ff-data-z   => shw.nor-xyz.in-2
+
+net lock-xyz    <= shw.ff-xyz-lock.out
+net lock-xyz    => shw.lock-xyz.in-3
+net key-ena     => shw.lock-xyz.in-4
+
+net release-xyz <= shw.nor-xyz.out
+net release-xyz => shw.ff-xyz-lock.reset
+
+net ff-clk-xyz  <= shw.lock-xyz.out
+net ff-clk-xyz  => shw.ff-xyz-lock.set
+net ff-clk-xyz  => shw.ff-x.clk
+net ff-clk-xyz  => shw.ff-y.clk
+net ff-clk-xyz  => shw.ff-z.clk
+net ff-data-x   => shw.ff-x.data
+net ff-data-y   => shw.ff-y.data
+net ff-data-z   => shw.ff-z.data
+
+net ff-data0001 <= debounce.1.3.out
+net ff-data001  <= debounce.1.4.out
+net ff-data01   <= debounce.1.5.out
+
+net ff-data0001 => shw.lock-step.in-0
+net ff-data001  => shw.lock-step.in-1
+net ff-data01   => shw.lock-step.in-2
+
+net ff-data0001 => shw.nor-step.in-0
+net ff-data001  => shw.nor-step.in-1
+net ff-data01   => shw.nor-step.in-2
+
+net lock-step   <= shw.ff-step-lock.out
+net lock-step   => shw.lock-step.in-3
+net key-ena     => shw.lock-step.in-4
+
+net release-step <= shw.nor-step.out
+net release-step => shw.ff-step-lock.reset
+
+net ff-clk-step <= shw.lock-step.out
+net ff-clk-step => shw.ff-step-lock.set
+net ff-clk-step => shw.ff-0001.clk
+net ff-clk-step => shw.ff-001.clk
+net ff-clk-step => shw.ff-01.clk
+net ff-data0001 => shw.ff-0001.data
+net ff-data001  => shw.ff-001.data
+net ff-data01   => shw.ff-01.data
+
+loadrt oneshot names=shw.set-ff
+addf shw.set-ff servo-thread
+setp shw.set-ff.width 0.1
+
+net set-ff-out <= shw.set-ff.out
+net set-ff-out => shw.ff-x.set
+net set-ff-out => shw.ff-y.reset
+net set-ff-out => shw.ff-z.reset
+net set-ff-out => shw.ff-0001.set
+net set-ff-out => shw.ff-001.reset
+net set-ff-out => shw.ff-01.reset
+
+setp shw.set-ff.in 1
+
+net key-x <= shw.ff-x.out
+net key-x => shw.ena-x.in0
+net ena-x shw.ena-x.out => axis.x.jog-enable
+
+net key-y <= shw.ff-y.out
+net key-y => shw.ena-y.in0
+net ena-y shw.ena-y.out => axis.y.jog-enable
+
+net key-z <= shw.ff-z.out
+net key-z => shw.ena-z.in0
+net ena-z shw.ena-z.out => axis.z.jog-enable
+
+net key-0001 <= shw.ff-0001.out
+net key-001  <= shw.ff-001.out
+net key-01   <= shw.ff-01.out
+
+net key-run  <= debounce.1.6.out
+net key-run  => halui.program.run
+net key-run  => halui.mode.auto
+net led-run  <= halui.program.is-running
+net led-run  => shw.run-pause.in-0
+
+net key-zero <= debounce.1.7.out
+net key-zero => shw.zero-x.in1
+net key-zero => shw.zero-y.in1
+net key-zero => shw.zero-z.in1
+net key-zero => halui.mode.mdi
+
+net key-x => shw.zero-x.in0
+net key-y => shw.zero-y.in0
+net key-z => shw.zero-z.in0
+
+net zero-x shw.zero-x.out => halui.mdi-command-00
+net zero-y shw.zero-y.out => halui.mdi-command-01
+net zero-z shw.zero-z.out => halui.mdi-command-02
+
+net key-stop <= debounce.1.8.out
+net key-stop => halui.program.stop
+net led-stop <= halui.program.is-idle
+
+net key-ena <= debounce.1.9.out
+net key-ena => shw.ena-x.in1
+net key-ena => shw.ena-y.in1
+net key-ena => shw.ena-z.in1
+net key-ena => halui.mode.manual
+###################################################################
+# net key-ena => axisui.notifications-clear
+#
+# loadrt siggen
+# addf siggen.0.update servo-thread
+# 
+# net pauseison => shw.run-pause.in-1
+# net clock-1Hz siggen.0.clock => shw.run-pause.in-2
+# net led-run-pause shw.run-pause.out => lsrio16.0.in-6
+#
+# eingetragen in "custom_postgui.hal".
+###################################################################
+
+net enc-00 <= shw.conv.out
+net enc-00 => shw.enc-smooth.in
+net enc-01 <= shw.enc-smooth.out
+net enc-01 => joint.0.jog-counts axis.x.jog-counts
+net enc-01 => joint.1.jog-counts axis.y.jog-counts
+net enc-01 => joint.2.jog-counts axis.z.jog-counts
+

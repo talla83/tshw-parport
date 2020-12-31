@@ -1,0 +1,29 @@
+# Include your custom_postgui HAL commands here
+# This file will not be overwritten when you run PNCconf again
+
+net set-probe-xy halui.mdi-command-03  <= pyvcp.set-probe-xy
+net goto-probe-xy halui.mdi-command-04 <= pyvcp.goto-probe-xy
+net do-the-probe halui.mdi-command-05  <= pyvcp.do-the-probe
+net set-xy-zero halui.mdi-command-06   <= pyvcp.set-xy-zero
+
+net key-ena => axisui.notifications-clear
+
+loadrt toggle
+loadrt toggle2nist
+
+addf toggle.0 servo-thread 
+addf toggle2nist.0 servo-thread 
+
+net pausesig pyvcp.pausebutton toggle.0.in
+net togglesig toggle.0.out toggle2nist.0.in
+
+net toggleon toggle2nist.0.on  => halui.program.pause
+net toggleoff toggle2nist.0.off => halui.program.resume
+net pauseison halui.program.is-paused => toggle2nist.0.is-on
+
+loadrt siggen
+addf siggen.0.update servo-thread
+
+net pauseison => shw.run-pause.in-1
+net clock-1Hz siggen.0.clock => shw.run-pause.in-2
+net led-run-pause shw.run-pause.out => lsrio16.0.in-6
